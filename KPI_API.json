@@ -1,0 +1,95 @@
+{
+  "name": "KPI_API",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "metrics",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "def16a73-1aed-497e-b6a4-d29df51266a6",
+      "name": "Webhook",
+      "webhookId": "fefda1ba-f128-49db-ad93-7d8574c7c2c1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- CTE 1: Capturar los parámetros de fecha de la URL\nWITH date_params AS (\n    SELECT\n        -- Usamos expresiones de n8n para obtener 'start' y 'end' de la URL.\n        -- Si no se proporcionan, usamos fechas por defecto para evitar errores.\n        '{{ $json.query.start || '2025-06-01' }}'::date AS start_date,\n        '{{ $json.query.end || '2025-06-30' }}'::date AS end_date\n),\n\n-- CTE 2: Calcular los KPIs DENTRO del rango de fechas especificado\nkpi_calculations AS (\n    SELECT\n        SUM(spend) AS total_spend,\n        SUM(conversions) AS total_conversions\n    FROM\n        public.spends_report, date_params\n    WHERE\n        -- Filtramos los datos para que estén entre las fechas de inicio y fin\n        \"date\" >= date_params.start_date AND \"date\" <= date_params.end_date\n)\n\n-- Selección Final: Calcular y devolver los KPIs finales\nSELECT\n    -- Usamos NULLIF para evitar errores de división por cero\n    total_spend / NULLIF(total_conversions, 0) AS cac,\n    (total_conversions * 100) / NULLIF(total_spend, 0) AS roas\nFROM\n    kpi_calculations;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        208,
+        0
+      ],
+      "id": "95706971-7d89-432a-aa82-4faee2f8665a",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "6wTcQV8M9chqhYKh",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"Period\": \"{{ $('Webhook').item.json.query.start }} to {{ $('Webhook').item.json.query.end }}\",\n  \"CAC\":  {{ $json.cac }},\n  \"ROAS\": {{ $json.roas }}\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        400,
+        0
+      ],
+      "id": "cadfc39c-831d-49e6-9cd4-c0392dad3ecc",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "cdc6b25c-b519-4a97-bf79-47aa6b90f74f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f80c9c3cfeaa673576a78d5b7a1c0da076b9ceb73d6fac38370af5d56989d98e"
+  },
+  "id": "WSaxJwqlKwjtv0wO",
+  "tags": []
+}
