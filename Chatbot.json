@@ -1,0 +1,258 @@
+{
+  "name": "Chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "33ec82bc-adb0-46cb-bd20-fe50effe9b34",
+      "name": "When chat message received",
+      "webhookId": "cff5b804-b4ae-4c56-84ac-0ee7fda562a2"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        192
+      ],
+      "id": "f4230508-7ab4-4423-a139-b738c4d95d5d",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "6wTcQV8M9chqhYKh",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n\t\"date_1\": \"string\",\n    \"date_2\"  : \"string\",\n    \"required\": [\"date_1\"] \n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        352,
+        176
+      ],
+      "id": "1e55d262-e81a-473e-ab9e-73dc3fc2f4ba",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a helpful assistant that will only deliver one or two formatted dates according to the following instructions:\n-If one date is explicitly mentioned in chat message, you must output only that date, \"previous period\" or similar must never be considered as a second date.\n-if two dates are explicitly mentioned in message, you must output both dates "
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "87d736ca-229f-4310-90bd-79dbdfb180d3",
+      "name": "AI Extract dates"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2d28acec-c33e-4fff-80f2-174fcc5781b1",
+              "leftValue": "={{ $json.output.dates }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "array",
+                "operation": "lengthGt",
+                "rightType": "number"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        0
+      ],
+      "id": "091d706c-d1ab-4b3c-a445-a21315267095",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        64,
+        208
+      ],
+      "id": "cb5c04c1-395c-4f24-886c-d4264884e8b3",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "oFnw5HfCZ0tIWFVW",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nWITH date_params AS (\n    SELECT\n        '{{ $json.output.dates[0] }}'::date AS start_date,\n        '{{ $json.output.dates[1] }}'::date AS end_date\n),\n\nkpi_calculations AS (\n    SELECT\n        SUM(spend) AS total_spend,\n        SUM(conversions) AS total_conversions\n    FROM\n        public.spends_report, date_params\n    WHERE\n        \"date\" >= date_params.start_date AND \"date\" <= date_params.end_date\n)\n\nSELECT\n    '{{ $json.output.dates[0] }}'::date AS start_date,\n    '{{ $json.output.dates[1] }}'::date AS end_date,\n    total_spend / NULLIF(total_conversions, 0) AS cac,\n    (total_conversions * 100) / NULLIF(total_spend, 0) AS roas\nFROM\n    kpi_calculations;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        720,
+        -80
+      ],
+      "id": "65b4b29e-af0c-4b6d-9cbd-a951421fabf8",
+      "name": "KPIs in a specific period",
+      "credentials": {
+        "postgres": {
+          "id": "6wTcQV8M9chqhYKh",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- get dates \nWITH date_ranges AS (\n    SELECT\n        -- Período Actual: Desde hoy hacia atrás 30 días\n        '{{ $json.output.dates[0] }}'::date - INTERVAL '30 days' AS current_period_start,\n        '{{ $json.output.dates[0] }}'::date AS current_period_end,\n        -- Período Anterior: Desde hace 31 días hasta hace 60 días\n        '{{ $json.output.dates[0] }}'::date - INTERVAL '61 days' AS previous_period_start,\n        '{{ $json.output.dates[0] }}'::date - INTERVAL '31 days' AS previous_period_end\n),\n\n-- KPIs for current period\ncurrent_period_kpis AS (\n    SELECT\n        'Last 30 Days' AS period,\n        SUM(spend) AS total_spend,\n        SUM(conversions) AS total_conversions,\n        SUM(spend) / NULLIF(SUM(conversions), 0) AS cac,\n        (SUM(conversions) * 100) / NULLIF(SUM(spend), 0) AS roas\n    FROM\n        public.spends_report, date_ranges\n    WHERE\n        \"date\" >= date_ranges.current_period_start AND \"date\" <= date_ranges.current_period_end\n),\n\n-- KPIs for previous period\nprevious_period_kpis AS (\n    SELECT\n        'Previous 30 Days' AS period,\n        SUM(spend) AS total_spend,\n        SUM(conversions) AS total_conversions,\n        SUM(spend) / NULLIF(SUM(conversions), 0) AS cac,\n        (SUM(conversions) * 100) / NULLIF(SUM(spend), 0) AS roas\n    FROM\n        public.spends_report, date_ranges\n    WHERE\n        \"date\" >= date_ranges.previous_period_start AND \"date\" <= date_ranges.previous_period_end\n)\n\n-- Calculate KPI\nSELECT\n    'CAC' AS metric,\n    current.cac AS last_30_days,\n    previous.cac AS previous_30_days,\n    COALESCE((current.cac - previous.cac) / NULLIF(previous.cac, 0) * 100, 0) AS delta_percent\nFROM\n    current_period_kpis current, previous_period_kpis previous\n\nUNION ALL\n\nSELECT\n    'ROAS' AS metric,\n    current.roas AS last_30_days,\n    previous.roas AS previous_30_days,\n    COALESCE((current.roas - previous.roas) / NULLIF(previous.roas, 0) * 100, 0) AS delta_percent\nFROM\n    current_period_kpis current, previous_period_kpis previous;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        704,
+        160
+      ],
+      "id": "a53bdda7-8572-4e7b-8c53-b6aa44fa07cb",
+      "name": "KPI from current and prev",
+      "credentials": {
+        "postgres": {
+          "id": "6wTcQV8M9chqhYKh",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Extract dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Extract dates",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Extract dates",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Extract dates": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "KPIs in a specific period",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "KPI from current and prev",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Extract dates",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KPIs in a specific period": {
+      "main": [
+        []
+      ]
+    },
+    "KPI from current and prev": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f60d182e-4505-4989-8026-493a090b1d6a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f80c9c3cfeaa673576a78d5b7a1c0da076b9ceb73d6fac38370af5d56989d98e"
+  },
+  "id": "rmcqJyln6r81pzAi",
+  "tags": []
+}
